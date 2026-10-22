@@ -1,0 +1,74 @@
+name: Build NoSwipe
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Write source
+        run: |
+          cat > Tweak.m <<'EOF'
+          #import <UIKit/UIKit.h>
+          #import <objc/runtime.h>
+
+          #ifndef HIDE
+          #define HIDE 0
+          #endif
+
+          static UIRectEdge edgesImp(id self, SEL _cmd) { return UIRectEdgeBottom; }
+          static BOOL hideImp(id self, SEL _cmd) { return HIDE; }
+
+          static void refresh(void) {
+              dispatch_async(dispatch_get_main_queue(), ^{
+                  for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                      UIViewController *vc = w.rootViewController;
+                      if (!vc) continue;
+                      [vc setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
+                      [vc setNeedsUpdateOfHomeIndicatorAutoHidden];
+                  }
+              });
+          }
+
+          static void patch(Class c) {
+              if (!c) return;
+              class_replaceMethod(c, @selector(preferredScreenEdgesDeferringSystemGestures), (IMP)edgesImp, "Q16@0:8");
+              class_replaceMethod(c, @selector(prefersHomeIndicatorAutoHidden), (IMP)hideImp, "B16@0:8");
+          }
+
+          static void patchRoots(void) {
+              for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                  UIViewController *vc = w.rootViewController;
+                  if (vc) patch([vc class]);
+              }
+              refresh();
+          }
+
+          __attribute__((constructor))
+          static void init(void) {
+              const char *names[] = {"UnityViewController", "UnityDefaultViewController"};
+              for (int i = 0; i < 2; i++) patch(objc_getClass(names[i]));
+              [[NSNotificationCenter defaultCenter]
+                  addObserverForName:UIApplicationDidBecomeActiveNotification
+                              object:nil queue:[NSOperationQueue mainQueue]
+                          usingBlock:^(NSNotification *n) { patchRoots(); }];
+          }
+          EOF
+
+      - name: Build variants
+        run: |
+          mkdir out
+          for V in A B; do
+            if [ "$V" = "A" ]; then H=0; else H=1; fi
+            xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 \
+              -dynamiclib -fobjc-arc -DHIDE=$H \
+              -framework UIKit -framework Foundation \
+              -install_name @rpath/NoSwipe_$V.dylib \
+              -o out/NoSwipe_$V.dylib Tweak.m
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoSwipe
+          path: out/*.dylib
