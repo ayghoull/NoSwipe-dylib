@@ -16,8 +16,11 @@ jobs:
           #ifndef HIDE
           #define HIDE 0
           #endif
+          #ifndef EDGES
+          #define EDGES UIRectEdgeBottom
+          #endif
 
-          static UIRectEdge edgesImp(id self, SEL _cmd) { return UIRectEdgeBottom; }
+          static UIRectEdge edgesImp(id self, SEL _cmd) { return EDGES; }
           static BOOL hideImp(id self, SEL _cmd) { return HIDE; }
 
           static void refresh(void) {
@@ -59,14 +62,18 @@ jobs:
       - name: Build variants
         run: |
           mkdir out
-          for V in A B; do
-            if [ "$V" = "A" ]; then H=0; else H=1; fi
+          build() {
             xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 \
-              -dynamiclib -fobjc-arc -DHIDE=$H \
+              -dynamiclib -fobjc-arc -DHIDE=$2 "-DEDGES=$3" \
               -framework UIKit -framework Foundation \
-              -install_name @rpath/NoSwipe_$V.dylib \
-              -o out/NoSwipe_$V.dylib Tweak.m
-          done
+              -install_name @rpath/$1.dylib \
+              -o out/$1.dylib Tweak.m
+          }
+          build NoSwipe_A 0 UIRectEdgeBottom
+          build NoSwipe_B 1 UIRectEdgeBottom
+          build NoSwipeTop 0 UIRectEdgeTop
+          build NoSwipeAll_A 0 "(UIRectEdgeTop|UIRectEdgeBottom)"
+          build NoSwipeAll_B 1 "(UIRectEdgeTop|UIRectEdgeBottom)"
 
       - uses: actions/upload-artifact@v4
         with:
